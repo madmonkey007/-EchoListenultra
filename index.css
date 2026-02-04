@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #181C21;
+  color: white;
+  overflow: hidden;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Smooth scale interaction */
+.active-scale:active {
+  transform: scale(0.96);
+}
+
+/* Subtle text selection */
+::selection {
+  background: rgba(0, 228, 255, 0.2);
+  color: #00E4FF;
+}
