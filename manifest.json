@@ -2,60 +2,36 @@
   "name": "EchoListen - AI音频学习助手",
   "short_name": "EchoListen",
   "description": "基于AI的音频切片、转录与语言学习应用。支持音频播放、词汇学习和间隔重复复习。",
-  "start_url": "./",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#181C21",
   "theme_color": "#0B4F6C",
   "orientation": "portrait-primary",
-  "scope": "./",
+  "scope": "/",
   "icons": [
     {
-      "src": "icons/icon-72.png",
-      "sizes": "72x72",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-128.png",
-      "sizes": "128x128",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-152.png",
-      "sizes": "152x152",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-192.png",
+      "src": "/assets/icon-192-DQ6liDWZ.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "icons/icon-384.png",
-      "sizes": "384x384",
+      "src": "/assets/icon-192-DQ6liDWZ.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/assets/icon-512-DQ6liDWZ.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icons/icon-512.png",
+      "src": "/assets/icon-512-DQ6liDWZ.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ],
   "categories": ["education", "productivity"],
@@ -65,15 +41,15 @@
       "name": "添加音频",
       "short_name": "添加",
       "description": "添加新的音频学习会话",
-      "url": "./#/add",
-      "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }]
+      "url": "/#/add",
+      "icons": [{ "src": "/assets/icon-192-DQ6liDWZ.png", "sizes": "192x192" }]
     },
     {
       "name": "词汇本",
       "short_name": "词汇",
       "description": "查看已保存的词汇",
-      "url": "./#/vocabulary",
-      "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }]
+      "url": "/#/vocabulary",
+      "icons": [{ "src": "/assets/icon-192-DQ6liDWZ.png", "sizes": "192x192" }]
     }
   ]
 }
