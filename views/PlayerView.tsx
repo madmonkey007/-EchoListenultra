@@ -7,6 +7,15 @@ import { GoogleGenAI, Type } from "@google/genai";
 const SPEAKER_COLORS = ["text-accent", "text-indigo-400", "text-emerald-400", "text-orange-400", "text-pink-400"];
 const LATENCY_COMPENSATION = 0.05;
 
+// AudioContext Singleton for TTS and UI sounds to prevent "Too many AudioContexts"
+let globalTTSContext: AudioContext | null = null;
+const getTTSContext = () => {
+  if (!globalTTSContext) {
+    globalTTSContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+  }
+  return globalTTSContext;
+};
+
 const getAudioFromDB = (id: string): Promise<Blob | null> => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('EchoListenStorage', 1);
@@ -85,27 +94,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
   const scrollRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
 
-  useEffect(() => {
-    let url: string | null = null;
-    const initAudio = async () => {
-      const blob = await getAudioFromDB(session.id);
-      if (blob) {
-        url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        audio.currentTime = editedSegments[activeIdx]?.startTime || 0;
-        audio.playbackRate = speed;
-        audio.addEventListener('canplaythrough', () => setIsSourceReady(true));
-        audio.addEventListener('ended', handleAudioEnded);
-      }
-    };
-    initAudio();
-    return () => {
-      if (audioRef.current) audioRef.current.pause();
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [session.id]);
-
   const handleAudioEnded = () => {
     if (!audioRef.current) return;
     if (playbackMode === PlaybackMode.SINGLE_LOOP) {
@@ -115,20 +103,46 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
       const next = Math.floor(Math.random() * editedSegments.length);
       jumpToSegment(next);
     } else {
-      // LIST_LOOP
-      if (activeIdx < editedSegments.length - 1) {
-        jumpToSegment(activeIdx + 1);
-      } else {
-        setIsPlaying(false);
-      }
+      if (activeIdx < editedSegments.length - 1) jumpToSegment(activeIdx + 1);
+      else setIsPlaying(false);
     }
   };
 
   useEffect(() => {
+    let url: string | null = null;
+    const currentAudio = new Audio();
+    const initAudio = async () => {
+      const blob = await getAudioFromDB(session.id);
+      if (blob) {
+        url = URL.createObjectURL(blob);
+        currentAudio.src = url;
+        audioRef.current = currentAudio;
+        currentAudio.currentTime = editedSegments[activeIdx]?.startTime || 0;
+        currentAudio.playbackRate = speed;
+        currentAudio.addEventListener('canplaythrough', () => setIsSourceReady(true));
+        currentAudio.addEventListener('ended', handleAudioEnded);
+      }
+    };
+    initAudio();
+    return () => {
+      currentAudio.pause();
+      currentAudio.removeEventListener('ended', handleAudioEnded);
+      if (url) URL.revokeObjectURL(url);
+      audioRef.current = null;
+    };
+  }, [session.id]);
+
+  useEffect(() => {
     if (audioRef.current && isSourceReady) {
       audioRef.current.playbackRate = speed;
-      if (isPlaying) audioRef.current.play().catch(() => setIsPlaying(false));
-      else audioRef.current.pause();
+      if (isPlaying) {
+        audioRef.current.play().catch(e => {
+          console.error("Playback failed", e);
+          setIsPlaying(false);
+        });
+      } else {
+        audioRef.current.pause();
+      }
     }
   }, [isPlaying, isSourceReady, speed]);
 
@@ -138,12 +152,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         const time = audioRef.current.currentTime;
         setCurrentTime(time);
         
-        // Single loop internal check
         if (playbackMode === PlaybackMode.SINGLE_LOOP) {
           const seg = editedSegments[activeIdx];
-          if (time >= seg.endTime) {
-            audioRef.current.currentTime = seg.startTime;
-          }
+          if (time >= seg.endTime) audioRef.current.currentTime = seg.startTime;
         }
 
         const adjustedTime = time + (isPlaying ? LATENCY_COMPENSATION : 0);
@@ -164,7 +175,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
 
   const handleWordClick = async (word: string, sentence: string) => {
     if (isEditMode) return;
-    const cleanWord = word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").toLowerCase();
+    const cleanWord = word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").trim().toLowerCase();
     if (!cleanWord) return;
     
     setSelectedWord({ word: cleanWord, phonetic: "...", definition: "", translation: "Translating...", example: sentence });
@@ -194,13 +205,16 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
       });
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        const ctx = getTTSContext();
+        if (ctx.state === 'suspended') await ctx.resume();
         const audioBuffer = await decodeAudioData(decodeBase64(base64Audio), ctx, 24000, 1);
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
         source.onended = () => setIsSpeaking(false);
         source.start();
+      } else {
+        setIsSpeaking(false);
       }
     } catch (e) { setIsSpeaking(false); }
   };
@@ -222,7 +236,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
 
   const renderTextWithClicks = (segment: AudioSegment, currentTime: number, activeColor: string, dimColor: string, state: string) => {
     const { text, words: wordTimings, startTime, endTime } = segment;
-    const tokens = text.split(' ');
+    const tokens = text.split(/\s+/);
     const lowerSavedWords = savedWords.map(w => w.word.toLowerCase());
     const adjustedTime = currentTime + LATENCY_COMPENSATION;
     const hasWordTimings = wordTimings && wordTimings.length === tokens.length;
@@ -281,7 +295,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         </div>
       )}
 
-      {/* Playlist / Segment List Drawer */}
+      {/* Playlist Drawer */}
       {showPlaylist && (
         <div className="absolute inset-0 z-[150] flex items-end justify-center animate-fade-in p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPlaylist(false)}></div>
@@ -323,7 +337,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         {mode === PlayerMode.VINYL && (
           <div className="h-full flex flex-col items-center justify-center py-10 space-y-12 animate-fade-in">
              <div className={`size-64 rounded-full bg-gradient-to-tr from-gray-900 to-black p-1 shadow-[0_20px_50px_rgba(0,0,0,0.8)] border border-white/5 relative flex items-center justify-center ${isPlaying ? 'animate-spin-slow' : ''}`}>
-               <div className="size-full rounded-full overflow-hidden border-2 border-white/10"><img src={session.coverUrl} className="size-full object-cover opacity-50" /></div>
+               <div className="size-full rounded-full overflow-hidden border-2 border-white/10"><img src={session.coverUrl} className="size-full object-cover opacity-50" alt="" /></div>
                <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,_transparent_40%,_black_90%)]"></div>
                <div className="absolute size-10 rounded-full bg-[#181C21] border-2 border-white/10 flex items-center justify-center shadow-inner"><div className="size-2 rounded-full bg-accent"></div></div>
              </div>

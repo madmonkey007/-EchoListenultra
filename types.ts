@@ -31,6 +31,7 @@ export interface AIProviderConfig {
   customModelId: string;
   deepgramApiKey: string;
   deepgramLanguage: string;
+  theme: 'dark' | 'light';
 }
 
 export interface WordTiming {

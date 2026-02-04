@@ -1,47 +1,25 @@
+
 {
-  "name": "EchoListen - AI音频学习助手",
+  "name": "EchoListen",
   "short_name": "EchoListen",
-  "description": "基于AI的音频切片、转录与语言学习应用。支持音频播放、词汇学习和间隔重复复习。",
-  "start_url": "/",
+  "description": "Smart audio slicing and immersive foreign language listening app.",
+  "start_url": "./index.html",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#181C21",
-  "theme_color": "#0B4F6C",
-  "orientation": "portrait-primary",
-  "scope": "/",
+  "theme_color": "#181C21",
+  "categories": ["education", "productivity"],
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "https://cdn-icons-png.flaticon.com/512/3659/3659898.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.png",
+      "src": "https://cdn-icons-png.flaticon.com/512/3659/3659898.png",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
-  "categories": ["education", "productivity"],
-  "screenshots": [],
-  "shortcuts": [
-    {
-      "name": "添加音频",
-      "short_name": "添加",
-      "description": "添加新的音频学习会话",
-      "url": "/add",
-      "icons": [
-        { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }
-      ]
-    },
-    {
-      "name": "词汇本",
-      "short_name": "词汇",
-      "description": "查看已保存的词汇",
-      "url": "/vocabulary",
-      "icons": [
-        { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }
-      ]
+      "type": "image/png"
     }
   ]
 }

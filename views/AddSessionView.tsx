@@ -3,7 +3,6 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AudioSession, SlicingMethod, AIProviderConfig, AudioSegment, WordTiming } from '../types.ts';
 import { GoogleGenAI, Type } from "@google/genai";
-import { createClient } from '@deepgram/sdk';
 
 const saveAudioToDB = (id: string, blob: Blob): Promise<void> => {
   return new Promise((resolve, reject) => {
@@ -40,9 +39,10 @@ const getAudioDuration = (file: File): Promise<number> => {
 interface AddSessionViewProps {
   onAdd: (session: AudioSession) => void;
   apiConfig: AIProviderConfig;
+  isOnline?: boolean;
 }
 
-const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => {
+const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnline = true }) => {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [method, setMethod] = useState<SlicingMethod>(SlicingMethod.TURNS);
@@ -57,7 +57,15 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
   };
 
   const handleGenerate = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || !isOnline) return;
+    
+    // Safety check for API Key
+    const apiKey = process.env.API_KEY || apiConfig.customApiKey;
+    if (!apiKey) {
+      alert("API Key is missing. Please go to Settings to configure your key.");
+      navigate('/settings');
+      return;
+    }
 
     setProcessingStatus('uploading');
     setProgress(10);
@@ -65,42 +73,32 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
     try {
       const sessionId = Math.random().toString(36).substr(2, 9);
       const audioDuration = await getAudioDuration(selectedFile);
-
-      // Guard: 5-minute duration limit
-      const MAX_DURATION_SECONDS = 5 * 60;
-      if (audioDuration > MAX_DURATION_SECONDS) {
-        alert(`Audio exceeds 5-minute limit (${Math.round(audioDuration / 60)}:${(audioDuration % 60).toFixed(0).padStart(2, '0')}). Please upload a shorter file.`);
-        setProcessingStatus('idle');
-        return;
-      }
-
       let segments: AudioSegment[] = [];
-      const canUseDeepgram = apiConfig.provider === 'deepgram' && apiConfig.deepgramApiKey && apiConfig.deepgramApiKey !== 'your_deepgram_api_key_here';
 
-      if (!canUseDeepgram && apiConfig.provider === 'deepgram') {
-        alert("Please configure your Deepgram API Key in Settings first.");
-        setProcessingStatus('idle');
-        return;
-      }
+      const canUseDeepgram = apiConfig.provider === 'deepgram' && apiConfig.deepgramApiKey && apiConfig.deepgramApiKey !== 'YOUR_DEEPGRAM_API_KEY';
 
       setProcessingStatus('transcribing');
       setProgress(30);
 
       if (canUseDeepgram) {
-        const deepgram = createClient(apiConfig.deepgramApiKey);
+        const url = new URL('https://api.deepgram.com/v1/listen');
+        url.searchParams.append('model', 'nova-3');
+        url.searchParams.append('smart_format', 'true');
+        url.searchParams.append('diarize', 'true');
+        url.searchParams.append('language', apiConfig.deepgramLanguage || 'en');
 
-        const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
-          selectedFile,
-          {
-            model: 'nova-3',
-            smart_format: true,
-            diarize: true,
-            language: apiConfig.deepgramLanguage || 'en'
-          }
-        );
+        const response = await fetch(url.toString(), {
+          method: 'POST',
+          headers: {
+            'Authorization': `Token ${apiConfig.deepgramApiKey}`,
+            'Content-Type': selectedFile.type || 'audio/mpeg'
+          },
+          body: selectedFile
+        });
 
-        if (error) throw new Error(`Deepgram Error: ${error.message}`);
-        const words = result.results?.channels?.[0]?.alternatives?.[0]?.words || [];
+        if (!response.ok) throw new Error("Deepgram Service Error");
+        const data = await response.json();
+        const words = data.results?.channels?.[0]?.alternatives?.[0]?.words || [];
         
         setProgress(60);
         setProcessingStatus('slicing');
@@ -140,8 +138,7 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
           });
         }
       } else {
-        // Gemini Flow (Built-in Key)
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const ai = new GoogleGenAI({ apiKey });
         const reader = new FileReader();
         const base64Audio = await new Promise<string>((res) => {
           reader.onload = () => res((reader.result as string).split(',')[1]);
@@ -153,9 +150,7 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
           contents: {
             parts: [
               { inlineData: { mimeType: selectedFile.type || 'audio/mpeg', data: base64Audio } },
-              { text: `Transcribe this audio with Speaker Diarization. Identify Speaker 1, 2, etc. 
-                       Analyze the content and split it into segments based on the ${method} rule (sensitivity: ${ruleValue}).
-                       Return JSON format: {segments: [{startTime, endTime, text, speaker}]}` }
+              { text: `Transcribe this audio with Speaker Diarization. Identify Speaker 1, 2, etc. Analyze the content and split it into segments based on the ${method} rule (sensitivity: ${ruleValue}). Return JSON format.` }
             ]
           },
           config: { 
@@ -189,7 +184,7 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
       onAdd({
         id: sessionId,
         title: selectedFile.name.replace(/\.[^/.]+$/, ""),
-        subtitle: `${segments.length} segments • ${canUseDeepgram ? 'Deepgram ASR' : 'Built-in Engine'}`,
+        subtitle: `${segments.length} segments • Built-in Engine`,
         coverUrl: `https://picsum.photos/seed/${sessionId}/400/400`,
         segments,
         duration: audioDuration || segments[segments.length - 1]?.endTime || 0,
@@ -225,6 +220,13 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
         <p className="font-bold text-sm text-center truncate w-full text-white">{selectedFile ? selectedFile.name : 'Select File'}</p>
       </div>
 
+      {!isOnline && (
+        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
+          <span className="material-symbols-outlined text-red-500">wifi_off</span>
+          <p className="text-[10px] font-black uppercase text-red-500 tracking-widest">Internet Required for AI Processing</p>
+        </div>
+      )}
+
       {processingStatus === 'idle' ? (
         <div className="space-y-4 animate-fade-in">
           <h3 className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Slicing Method</h3>
@@ -250,8 +252,12 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig }) => 
         </div>
       )}
 
-      <button onClick={handleGenerate} disabled={processingStatus !== 'idle' || !selectedFile} className="w-full bg-accent py-5 rounded-[2rem] font-black text-black shadow-2xl disabled:opacity-20 transition-all active:scale-95">
-        {processingStatus === 'idle' ? 'Start Processing' : 'Processing...'}
+      <button 
+        onClick={handleGenerate} 
+        disabled={processingStatus !== 'idle' || !selectedFile || !isOnline} 
+        className={`w-full py-5 rounded-[2rem] font-black text-black shadow-2xl transition-all active:scale-95 ${isOnline ? 'bg-accent' : 'bg-gray-600 opacity-50 cursor-not-allowed'}`}
+      >
+        {!isOnline ? 'Network Required' : (processingStatus === 'idle' ? 'Start Processing' : 'Processing...')}
       </button>
     </div>
   );

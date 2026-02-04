@@ -28,7 +28,6 @@ const INITIAL_SESSIONS: AudioSession[] = [
   }
 ];
 
-// Default config: Uses the built-in engine (Gemini) which relies on process.env.API_KEY
 const DEFAULT_CONFIG: AIProviderConfig = {
   provider: 'gemini',
   geminiModel: 'gemini-3-flash-preview',
@@ -36,7 +35,8 @@ const DEFAULT_CONFIG: AIProviderConfig = {
   customApiKey: '',
   customModelId: '',
   deepgramApiKey: '', 
-  deepgramLanguage: 'en' 
+  deepgramLanguage: 'en',
+  theme: 'dark'
 };
 
 const AppContent: React.FC<{ 
@@ -52,14 +52,48 @@ const AppContent: React.FC<{
 }> = ({ sessions, addSession, updateSession, deleteSession, savedWords, toggleWord, updateWord, apiConfig, setApiConfig }) => {
   const location = useLocation();
   const isPlayerView = location.pathname.startsWith('/player');
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const metaTheme = document.getElementById('theme-meta');
+    if (apiConfig.theme === 'light') {
+      html.classList.remove('dark');
+      html.classList.add('light');
+      if (metaTheme) metaTheme.setAttribute('content', isOnline ? '#F1F5F9' : '#FCA5A5');
+    } else {
+      html.classList.remove('light');
+      html.classList.add('dark');
+      if (metaTheme) metaTheme.setAttribute('content', isOnline ? '#181C21' : '#7F1D1D');
+    }
+  }, [apiConfig.theme, isOnline]);
 
   return (
-    <div className="flex flex-col h-full w-full max-w-md mx-auto bg-background-dark overflow-hidden font-body relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
+    <div className="flex flex-col h-full w-full max-w-md mx-auto overflow-hidden font-body relative bg-background-light dark:bg-background-dark text-slate-900 dark:text-white safe-pt shadow-2xl">
+      {/* Offline Alert Banner */}
+      {!isOnline && (
+        <div className="bg-red-500 text-white text-[10px] font-black uppercase tracking-widest py-2 px-4 flex items-center justify-center gap-2 animate-pulse shrink-0">
+          <span className="material-symbols-outlined text-xs">cloud_off</span>
+          Offline Mode - AI Features Unavailable
+        </div>
+      )}
+      
       <main className={`flex-1 overflow-y-auto no-scrollbar ${isPlayerView ? 'pb-0' : 'pb-24'}`}>
         <Routes>
           <Route path="/" element={<HomeView sessions={sessions} />} />
           <Route path="/player/:id" element={<PlayerView sessions={sessions} savedWords={savedWords} toggleWord={toggleWord} onUpdateSession={updateSession} />} />
-          <Route path="/add" element={<AddSessionView onAdd={addSession} apiConfig={apiConfig} />} />
+          <Route path="/add" element={<AddSessionView onAdd={addSession} apiConfig={apiConfig} isOnline={isOnline} />} />
           <Route path="/vocabulary" element={<VocabularyView savedWords={savedWords} sessions={sessions} onUpdateWord={updateWord} />} />
           <Route path="/settings" element={<SettingsView apiConfig={apiConfig} onConfigChange={setApiConfig} sessions={sessions} onDeleteCache={deleteSession} />} />
           <Route path="*" element={<Navigate to="/" />} />
@@ -75,7 +109,7 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('echo_sessions');
     return saved ? JSON.parse(saved) : INITIAL_SESSIONS;
   });
-
+  
   const [savedWords, setSavedWords] = useState<SavedWord[]>(() => {
     const saved = localStorage.getItem('echo_words_v2');
     return saved ? JSON.parse(saved) : [];
@@ -85,55 +119,6 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('echo_api_config');
     return saved ? { ...DEFAULT_CONFIG, ...JSON.parse(saved) } : DEFAULT_CONFIG;
   });
-
-  // PWA 安装提示状态
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
-
-  // 监听 PWA 安装事件
-  useEffect(() => {
-    const handler = (e: Event) => {
-      // 阻止默认的安装提示
-      e.preventDefault();
-      // 保存事件
-      setDeferredPrompt(e);
-      // 显示自定义安装提示
-      setShowInstallPrompt(true);
-      console.log('[PWA] beforeinstallprompt event fired');
-    };
-
-    window.addEventListener('beforeinstallprompt', handler);
-
-    // 检查应用是否已安装
-    window.addEventListener('appinstalled', () => {
-      setShowInstallPrompt(false);
-      setDeferredPrompt(null);
-      console.log('[PWA] App was installed');
-    });
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-    };
-  }, []);
-
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) {
-      console.log('[PWA] No deferred prompt available');
-      return;
-    }
-
-    // 显示安装提示
-    deferredPrompt.prompt();
-
-    // 等待用户响应
-    const { outcome } = await deferredPrompt.userChoice;
-
-    console.log(`[PWA] User response: ${outcome}`);
-
-    // 清除保存的 prompt
-    setDeferredPrompt(null);
-    setShowInstallPrompt(false);
-  };
 
   useEffect(() => {
     localStorage.setItem('echo_sessions', JSON.stringify(sessions));
@@ -183,37 +168,9 @@ const App: React.FC = () => {
 
   return (
     <Router>
-      {showInstallPrompt && (
-        <div className="fixed top-4 left-0 right-0 z-50 flex justify-center px-4">
-          <div className="bg-surface-dark border border-accent/30 rounded-2xl shadow-2xl px-6 py-4 flex items-center gap-4 animate-slide-up">
-            <div className="flex-1">
-              <div className="text-white font-display font-semibold text-sm">
-                安装 EchoListen
-              </div>
-              <div className="text-text-dim text-xs mt-1">
-                安装后可离线使用，体验更流畅
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowInstallPrompt(false)}
-                className="px-4 py-2 rounded-xl text-text-dim text-sm hover:bg-white/5 transition-all active-scale"
-              >
-                暂不
-              </button>
-              <button
-                onClick={handleInstallClick}
-                className="px-4 py-2 rounded-xl bg-accent text-background-dark font-semibold text-sm hover:opacity-90 transition-all active-scale shadow-lg shadow-accent/30"
-              >
-                安装
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      <AppContent
-        sessions={sessions}
-        addSession={addSession}
+      <AppContent 
+        sessions={sessions} 
+        addSession={addSession} 
         updateSession={updateSession}
         deleteSession={deleteSession}
         savedWords={savedWords}
