@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PWA 测试工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #181C21;
+            color: white;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            background: #1E232A;
+            border: 1px solid #333;
+        }
+        .status.success { border-color: #4CAF50; }
+        .status.error { border-color: #f44336; }
+        .status.warning { border-color: #ff9800; }
+        .status.info { border-color: #2196F3; }
+        button {
+            background: #00E4FF;
+            color: #0B4F6C;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { opacity: 0.9; }
+        button:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
+        pre {
+            background: #0f1419;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 EchoListen PWA 状态检测</h1>
+
+    <div id="results"></div>
+
+    <h2>📋 检测步骤</h2>
+    <div class="status info">
+        <strong>步骤 1：</strong> 打开浏览器控制台（按 F12）
+    </div>
+    <div class="status info">
+        <strong>步骤 2：</strong> 查看下方的检测结果
+    </div>
+    <div class="status info">
+        <strong>步骤 3：</strong> 如果显示"可以安装"，点击安装按钮
+    </div>
+
+    <script>
+        const results = document.getElementById('results');
+        let deferredPrompt = null;
+
+        function addResult(type, title, message) {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.innerHTML = `<strong>${title}</strong><br>${message}`;
+            results.appendChild(div);
+        }
+
+        function addCode(code) {
+            const pre = document.createElement('pre');
+            pre.textContent = code;
+            results.appendChild(pre);
+        }
+
+        // 检查 1: 浏览器支持
+        addResult('info', '🌐 浏览器支持检查',
+            `Service Worker: ${navigator.serviceWorker ? '✅ 支持' : '❌ 不支持'}<br>` +
+            `PWA Manifest: ${linkTypesSupported ? '✅ 支持' : '⚠️ 可能不支持'}`
+        );
+
+        // 检查 2: 是否在独立窗口（已安装）
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+                           window.matchMedia('(display-mode: minimal-ui)').matches;
+
+        addResult(
+            isStandalone ? 'success' : 'info',
+            '📱 安装状态',
+            isStandalone ? '✅ 应用已安装（独立窗口运行）' : '⚠️ 应用未安装（浏览器中运行）'
+        );
+
+        // 检查 3: HTTPS
+        const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        addResult(
+            isSecure ? 'success' : 'error',
+            '🔒 安全连接',
+            isSecure ? '✅ 使用 HTTPS 或 localhost' : '❌ PWA 需要 HTTPS（localhost 除外）'
+        );
+
+        // 检查 4: 监听 beforeinstallprompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+
+            addResult('success', '🎉 PWA 可以安装！',
+                '浏览器检测到 PWA，可以安装了！<br>' +
+                '点击下方按钮触发安装提示。'
+            );
+
+            // 添加安装按钮
+            const installBtn = document.createElement('button');
+            installBtn.textContent = '📥 安装应用';
+            installBtn.onclick = async () => {
+                if (deferredPrompt) {
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    addResult(
+                        outcome === 'accepted' ? 'success' : 'warning',
+                        outcome === 'accepted' ? '✅ 安装成功' : '⚠️ 安装取消',
+                        `用户选择：${outcome}`
+                    );
+                    deferredPrompt = null;
+                    installBtn.remove();
+                }
+            };
+            results.appendChild(installBtn);
+        });
+
+        // 检查 5: 监听安装完成
+        window.addEventListener('appinstalled', () => {
+            addResult('success', '✅ 应用已安装',
+                'PWA 安装完成！<br>现在可以从桌面或应用列表启动。'
+            );
+        });
+
+        // 检查 6: Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => {
+                    addResult('success', '⚙️ Service Worker',
+                        `✅ Service Worker 已注册<br>状态: ${reg.active ? '已激活' : '等待激活'}`
+                    );
+
+                    // 检查更新
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            addResult('info', '🔄 Service Worker 更新',
+                                `新版本状态: ${newWorker.state}`
+                            );
+                        });
+                    });
+                })
+                .catch(err => {
+                    addResult('error', '❌ Service Worker 注册失败',
+                        `错误: ${err.message}`
+                    );
+                });
+        }
+
+        // 检查 7: Manifest
+        fetch('./manifest.json')
+            .then(r => r.json())
+            .then(manifest => {
+                addResult('success', '📄 Manifest.json',
+                    `✅ Manifest 加载成功<br>` +
+                    `名称: ${manifest.name}<br>` +
+                    `短名称: ${manifest.short_name}<br>` +
+                    `图标数量: ${manifest.icons ? manifest.icons.length : 0}`
+                );
+                addCode(JSON.stringify(manifest, null, 2));
+            })
+            .catch(err => {
+                addResult('error', '❌ Manifest.json 加载失败',
+                    `错误: ${err.message}`
+                );
+            });
+
+        // 检查 8: 给用户的手动提示
+        setTimeout(() => {
+            if (!deferredPrompt && !isStandalone) {
+                addResult('warning', '💡 提示',
+                    `PWA 安装事件未触发。<br><br>` +
+                    `原因可能是：<br>` +
+                    `1. 应用已经安装过了<br>` +
+                    `2. 浏览器不支持该功能<br>` +
+                    `3. 需要手动通过浏览器菜单安装<br><br>` +
+                    `手动安装方法：<br>` +
+                    `- Chrome: 地址栏点击 ⋮ → 安装应用<br>` +
+                    `- Edge: 设置 → 应用 → 安装应用<br>` +
+                    `- 或按 Ctrl+Shift+A 打开应用列表`
+                );
+            }
+        }, 2000);
+
+        // 检查是否可以检测到链接类型支持
+        let linkTypesSupported = false;
+        try {
+            const link = document.createElement('link');
+            link.rel = 'manifest';
+            linkTypesSupported = true;
+        } catch (e) {
+            linkTypesSupported = false;
+        }
+    </script>
+</body>
+</html>
