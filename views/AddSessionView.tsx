@@ -59,13 +59,8 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
   const handleGenerate = async () => {
     if (!selectedFile || !isOnline) return;
     
-    // Safety check for API Key
-    const apiKey = process.env.API_KEY || apiConfig.customApiKey;
-    if (!apiKey) {
-      alert("API Key is missing. Please go to Settings to configure your key.");
-      navigate('/settings');
-      return;
-    }
+    const geminiKey = process.env.API_KEY;
+    const deepgramKey = apiConfig.deepgramApiKey;
 
     setProcessingStatus('uploading');
     setProgress(10);
@@ -75,12 +70,13 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
       const audioDuration = await getAudioDuration(selectedFile);
       let segments: AudioSegment[] = [];
 
-      const canUseDeepgram = apiConfig.provider === 'deepgram' && apiConfig.deepgramApiKey && apiConfig.deepgramApiKey !== 'YOUR_DEEPGRAM_API_KEY';
+      const useDeepgram = apiConfig.provider === 'deepgram' && deepgramKey && deepgramKey.trim().length > 5;
 
       setProcessingStatus('transcribing');
       setProgress(30);
 
-      if (canUseDeepgram) {
+      if (useDeepgram) {
+        console.log("[ASR] Initializing Deepgram Nova-3...");
         const url = new URL('https://api.deepgram.com/v1/listen');
         url.searchParams.append('model', 'nova-3');
         url.searchParams.append('smart_format', 'true');
@@ -90,13 +86,17 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
         const response = await fetch(url.toString(), {
           method: 'POST',
           headers: {
-            'Authorization': `Token ${apiConfig.deepgramApiKey}`,
+            'Authorization': `Token ${deepgramKey.trim()}`,
             'Content-Type': selectedFile.type || 'audio/mpeg'
           },
           body: selectedFile
         });
 
-        if (!response.ok) throw new Error("Deepgram Service Error");
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(`ASR Service Error: ${errData.err_msg || response.statusText}`);
+        }
+
         const data = await response.json();
         const words = data.results?.channels?.[0]?.alternatives?.[0]?.words || [];
         
@@ -119,12 +119,16 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
             const speakerChanged = w.speaker !== lastSpeaker;
             if (speakerChanged) turnCount++;
 
-            let split = false;
-            if (method === SlicingMethod.DURATION) split = (w.end - currentStart >= ruleValue * 60);
-            else if (method === SlicingMethod.TURNS) split = (turnCount >= ruleValue);
-            else split = (speakerChanged && (w.end - currentStart > 5));
+            let shouldSplit = false;
+            if (method === SlicingMethod.DURATION) {
+              shouldSplit = (w.end - currentStart >= ruleValue * 60);
+            } else if (method === SlicingMethod.TURNS) {
+              shouldSplit = (turnCount >= ruleValue);
+            } else {
+              shouldSplit = (speakerChanged && (w.end - currentStart > 5));
+            }
 
-            if (split || isLast) {
+            if (shouldSplit || isLast) {
               segments.push({
                 id: `seg-${segments.length}`,
                 startTime: currentStart,
@@ -133,12 +137,20 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
                 speaker: (lastSpeaker || 0) + 1,
                 words: [...currentWords]
               });
-              currentTokens = []; currentWords = []; currentStart = w.end; lastSpeaker = w.speaker; turnCount = 0;
+              currentTokens = []; 
+              currentWords = []; 
+              currentStart = w.end; 
+              lastSpeaker = w.speaker; 
+              turnCount = 0;
             }
           });
+        } else {
+          throw new Error("No transcription data returned from server.");
         }
       } else {
-        const ai = new GoogleGenAI({ apiKey });
+        if (!geminiKey) throw new Error("API Key configuration missing. Please check settings.");
+
+        const ai = new GoogleGenAI({ apiKey: geminiKey });
         const reader = new FileReader();
         const base64Audio = await new Promise<string>((res) => {
           reader.onload = () => res((reader.result as string).split(',')[1]);
@@ -146,11 +158,11 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
         });
         
         const response = await ai.models.generateContent({
-          model: apiConfig.geminiModel,
+          model: apiConfig.geminiModel || 'gemini-3-flash-preview',
           contents: {
             parts: [
               { inlineData: { mimeType: selectedFile.type || 'audio/mpeg', data: base64Audio } },
-              { text: `Transcribe this audio with Speaker Diarization. Identify Speaker 1, 2, etc. Analyze the content and split it into segments based on the ${method} rule (sensitivity: ${ruleValue}). Return JSON format.` }
+              { text: `Transcribe this audio. Return ONLY a JSON object with a "segments" array. Each segment needs: startTime(number), endTime(number), text(string), speaker(number). Use ${method} as slicing logic with sensitivity ${ruleValue}.` }
             ]
           },
           config: { 
@@ -174,7 +186,8 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
             }
           }
         });
-        segments = JSON.parse(response.text).segments;
+        const result = JSON.parse(response.text);
+        segments = result.segments;
       }
 
       setProcessingStatus('saving');
@@ -184,69 +197,64 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
       onAdd({
         id: sessionId,
         title: selectedFile.name.replace(/\.[^/.]+$/, ""),
-        subtitle: `${segments.length} segments • Built-in Engine`,
+        subtitle: `${segments.length} segments • ${useDeepgram ? 'Deepgram' : 'Gemini'}`,
         coverUrl: `https://picsum.photos/seed/${sessionId}/400/400`,
         segments,
-        duration: audioDuration || segments[segments.length - 1]?.endTime || 0,
+        duration: audioDuration || (segments.length > 0 ? segments[segments.length - 1].endTime : 0),
         lastPlayed: 'Just now',
         status: 'ready'
       });
       setProgress(100);
       navigate('/');
     } catch (e) {
-      alert("Error: " + (e as Error).message);
+      alert("Processing Failed: " + (e as Error).message);
       setProcessingStatus('idle');
     }
   };
 
   const statusText = {
-    idle: 'Start Transcription',
-    uploading: 'Preparing File...',
-    transcribing: 'AI Engine Working...',
-    slicing: 'Analyzing Dialogue...',
-    saving: 'Optimizing Store...'
+    idle: 'Initialize ASR',
+    uploading: 'Uploading File...',
+    transcribing: 'AI Transcribing...',
+    slicing: 'Semantic Slicing...',
+    saving: 'Caching Assets...'
   }[processingStatus];
 
   return (
-    <div className="p-6 pb-24 space-y-8 bg-background-dark min-h-full">
+    <div className="p-6 pb-24 space-y-8 bg-background-light dark:bg-background-dark min-h-full transition-colors duration-500">
       <header className="flex items-center gap-4 pt-4">
-        <button onClick={() => navigate('/')} className="size-10 bg-surface-dark rounded-xl flex items-center justify-center"><span className="material-symbols-outlined">arrow_back</span></button>
-        <h2 className="text-xl font-black text-white">Upload Audio</h2>
+        <button onClick={() => navigate('/')} className="size-10 bg-surface-light dark:bg-surface-dark border border-slate-200 dark:border-white/5 rounded-xl flex items-center justify-center shadow-sm dark:shadow-none transition-all active:scale-90">
+          <span className="material-symbols-outlined text-slate-500 dark:text-gray-400">arrow_back</span>
+        </button>
+        <h2 className="text-xl font-black text-slate-900 dark:text-white">Import Audio</h2>
       </header>
 
-      <div onClick={() => processingStatus === 'idle' && fileInputRef.current?.click()} className={`flex flex-col items-center justify-center p-12 bg-surface-dark border-2 border-dashed rounded-[2.5rem] transition-all ${selectedFile ? 'border-accent shadow-[0_0_20px_rgba(0,228,255,0.1)]' : 'border-white/10'} ${processingStatus !== 'idle' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+      <div onClick={() => processingStatus === 'idle' && fileInputRef.current?.click()} className={`flex flex-col items-center justify-center p-12 bg-surface-light dark:bg-surface-dark border-2 border-dashed rounded-[2.5rem] transition-all ${selectedFile ? 'border-accent shadow-lg' : 'border-slate-200 dark:border-white/10'} ${processingStatus !== 'idle' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-accent/50'}`}>
         <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-        <span className="material-symbols-outlined text-4xl mb-4 text-accent">{selectedFile ? 'task' : 'upload'}</span>
-        <p className="font-bold text-sm text-center truncate w-full text-white">{selectedFile ? selectedFile.name : 'Select File'}</p>
+        <span className="material-symbols-outlined text-4xl mb-4 text-accent">{selectedFile ? 'check_circle' : 'cloud_upload'}</span>
+        <p className="font-bold text-sm text-center truncate w-full text-slate-900 dark:text-white">{selectedFile ? selectedFile.name : 'Tap to select file'}</p>
       </div>
-
-      {!isOnline && (
-        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3">
-          <span className="material-symbols-outlined text-red-500">wifi_off</span>
-          <p className="text-[10px] font-black uppercase text-red-500 tracking-widest">Internet Required for AI Processing</p>
-        </div>
-      )}
 
       {processingStatus === 'idle' ? (
         <div className="space-y-4 animate-fade-in">
-          <h3 className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Slicing Method</h3>
-          <div className="grid grid-cols-3 bg-surface-dark p-1 rounded-2xl">
+          <h3 className="text-[10px] font-black uppercase text-slate-400 dark:text-gray-500 tracking-widest ml-1">Slicing Algorithm</h3>
+          <div className="grid grid-cols-3 bg-surface-light dark:bg-surface-dark p-1 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm">
             {[SlicingMethod.DURATION, SlicingMethod.TURNS, SlicingMethod.PARAGRAPH].map(m => (
-              <button key={m} onClick={() => setMethod(m)} className={`py-3 text-[10px] font-black rounded-xl transition-all ${method === m ? 'bg-primary text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>{m}</button>
+              <button key={m} onClick={() => setMethod(m)} className={`py-3 text-[10px] font-black rounded-xl transition-all ${method === m ? 'bg-slate-900 dark:bg-primary text-white shadow-lg' : 'text-slate-400 dark:text-gray-500 hover:text-slate-600 dark:hover:text-white'}`}>{m}</button>
             ))}
           </div>
-          <div className="bg-surface-dark p-6 rounded-3xl">
-             <div className="flex justify-between mb-4"><span className="text-xs font-bold text-accent">Sensitivity</span><span className="text-xl font-black text-white">{ruleValue}</span></div>
-             <input type="range" className="w-full h-1 bg-background-dark rounded-full appearance-none accent-accent" min="1" max="60" value={ruleValue} onChange={(e) => setRuleValue(parseInt(e.target.value))} />
+          <div className="bg-surface-light dark:bg-surface-dark p-6 rounded-3xl border border-slate-200 dark:border-white/5 shadow-sm">
+             <div className="flex justify-between mb-4"><span className="text-xs font-bold text-accent">Precision Factor</span><span className="text-xl font-black text-slate-900 dark:text-white">{ruleValue}</span></div>
+             <input type="range" className="w-full h-1 bg-slate-100 dark:bg-background-dark rounded-full appearance-none accent-accent" min="1" max="60" value={ruleValue} onChange={(e) => setRuleValue(parseInt(e.target.value))} />
           </div>
         </div>
       ) : (
-        <div className="space-y-6 py-4 animate-fade-in">
-          <div className="flex justify-between items-end mb-2">
-            <span className="text-xs font-black uppercase tracking-widest text-accent">{statusText}</span>
-            <span className="text-2xl font-black text-white">{progress}%</span>
+        <div className="space-y-6 py-4 animate-fade-in text-center">
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-xs font-black uppercase tracking-widest text-accent animate-pulse">{statusText}</span>
+            <span className="text-4xl font-black text-slate-900 dark:text-white">{progress}%</span>
           </div>
-          <div className="h-3 bg-surface-dark rounded-full overflow-hidden border border-white/5">
+          <div className="h-3 bg-slate-200 dark:bg-surface-dark rounded-full overflow-hidden border border-slate-200 dark:border-white/5 mx-4">
             <div className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-700 ease-out" style={{ width: `${progress}%` }}></div>
           </div>
         </div>
@@ -255,9 +263,9 @@ const AddSessionView: React.FC<AddSessionViewProps> = ({ onAdd, apiConfig, isOnl
       <button 
         onClick={handleGenerate} 
         disabled={processingStatus !== 'idle' || !selectedFile || !isOnline} 
-        className={`w-full py-5 rounded-[2rem] font-black text-black shadow-2xl transition-all active:scale-95 ${isOnline ? 'bg-accent' : 'bg-gray-600 opacity-50 cursor-not-allowed'}`}
+        className={`w-full py-5 rounded-[2rem] font-display text-lg font-black transition-all active:scale-95 ${isOnline && selectedFile ? 'bg-slate-900 dark:bg-accent text-white dark:text-black shadow-2xl' : 'bg-slate-200 dark:bg-gray-700 opacity-50 cursor-not-allowed text-slate-400 dark:text-gray-400'}`}
       >
-        {!isOnline ? 'Network Required' : (processingStatus === 'idle' ? 'Start Processing' : 'Processing...')}
+        {processingStatus === 'idle' ? (selectedFile ? 'Process Now' : 'Select File First') : 'Running AI...'}
       </button>
     </div>
   );

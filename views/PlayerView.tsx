@@ -7,7 +7,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 const SPEAKER_COLORS = ["text-accent", "text-indigo-400", "text-emerald-400", "text-orange-400", "text-pink-400"];
 const LATENCY_COMPENSATION = 0.05;
 
-// AudioContext Singleton for TTS and UI sounds to prevent "Too many AudioContexts"
 let globalTTSContext: AudioContext | null = null;
 const getTTSContext = () => {
   if (!globalTTSContext) {
@@ -136,10 +135,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
     if (audioRef.current && isSourceReady) {
       audioRef.current.playbackRate = speed;
       if (isPlaying) {
-        audioRef.current.play().catch(e => {
-          console.error("Playback failed", e);
-          setIsPlaying(false);
-        });
+        audioRef.current.play().catch(() => setIsPlaying(false));
       } else {
         audioRef.current.pause();
       }
@@ -273,24 +269,24 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
   };
 
   const PlaybackModeIcon = () => {
-    if (playbackMode === PlaybackMode.LIST_LOOP) return <span className="material-symbols-outlined text-white/30">repeat</span>;
+    if (playbackMode === PlaybackMode.LIST_LOOP) return <span className="material-symbols-outlined opacity-30">repeat</span>;
     if (playbackMode === PlaybackMode.SINGLE_LOOP) return <span className="material-symbols-outlined text-accent">repeat_one</span>;
     return <span className="material-symbols-outlined text-accent">shuffle</span>;
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#181C21] text-white overflow-hidden relative">
+    <div className="flex flex-col h-full bg-background-light dark:bg-background-dark text-slate-900 dark:text-white overflow-hidden relative transition-colors duration-500">
       {/* Word Definition Overlay */}
       {selectedWord && (
         <div className="absolute inset-0 z-[200] flex items-end justify-center animate-fade-in p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => setSelectedWord(null)}></div>
-          <div className="relative w-full max-w-md bg-surface-dark rounded-[3rem] p-10 border border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.5)] animate-slide-up mb-24">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-md" onClick={() => setSelectedWord(null)}></div>
+          <div className="relative w-full max-w-md bg-surface-light dark:bg-surface-dark rounded-[3rem] p-10 border border-slate-200 dark:border-white/10 shadow-2xl animate-slide-up mb-24">
             <div className="flex justify-between items-start mb-4">
               <div><h3 className="text-4xl font-black mb-1">{selectedWord.word}</h3><p className="text-accent text-sm italic font-medium">{selectedWord.phonetic}</p></div>
-              <button onClick={playWordAudio} className={`size-14 rounded-full flex items-center justify-center transition-all ${isSpeaking ? 'bg-accent text-black scale-95 shadow-[0_0_20px_rgba(0,228,255,0.5)]' : 'bg-white/5 text-white hover:bg-white/10'}`}><span className="material-symbols-outlined text-2xl fill-1">{isSpeaking ? 'volume_up' : 'volume_down'}</span></button>
+              <button onClick={playWordAudio} className={`size-14 rounded-full flex items-center justify-center transition-all ${isSpeaking ? 'bg-accent text-black' : 'bg-slate-100 dark:bg-white/5 text-slate-900 dark:text-white'}`}><span className="material-symbols-outlined text-2xl fill-1">{isSpeaking ? 'volume_up' : 'volume_down'}</span></button>
             </div>
-            <div className="bg-white/5 p-6 rounded-3xl mb-8 border border-white/5"><p className="text-white text-xl font-black mb-2">{selectedWord.translation}</p><p className="text-gray-400 text-sm leading-relaxed">{selectedWord.definition}</p></div>
-            <button onClick={() => toggleWord(selectedWord.word, session.id, selectedWord)} className={`w-full py-5 rounded-2xl font-black uppercase text-xs tracking-[0.2em] transition-all active:scale-95 ${savedWords.some(w => w.word.toLowerCase() === selectedWord.word.toLowerCase()) ? 'bg-white/10 text-white' : 'bg-accent text-black shadow-xl shadow-accent/20'}`}>{savedWords.some(w => w.word.toLowerCase() === selectedWord.word.toLowerCase()) ? 'Remove from Saved' : 'Save to Folder'}</button>
+            <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-3xl mb-8 border border-slate-100 dark:border-white/5"><p className="text-slate-900 dark:text-white text-xl font-black mb-2">{selectedWord.translation}</p><p className="text-slate-500 dark:text-gray-400 text-sm leading-relaxed">{selectedWord.definition}</p></div>
+            <button onClick={() => toggleWord(selectedWord.word, session.id, selectedWord)} className={`w-full py-5 rounded-2xl font-black uppercase text-xs tracking-[0.2em] transition-all active:scale-95 ${savedWords.some(w => w.word.toLowerCase() === selectedWord.word.toLowerCase()) ? 'bg-slate-200 dark:bg-white/10 text-slate-900 dark:text-white' : 'bg-slate-900 dark:bg-accent text-white dark:text-black shadow-xl'}`}>{savedWords.some(w => w.word.toLowerCase() === selectedWord.word.toLowerCase()) ? 'Remove from Saved' : 'Save to Folder'}</button>
           </div>
         </div>
       )}
@@ -298,21 +294,21 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
       {/* Playlist Drawer */}
       {showPlaylist && (
         <div className="absolute inset-0 z-[150] flex items-end justify-center animate-fade-in p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowPlaylist(false)}></div>
-          <div className="relative w-full max-w-md bg-surface-dark rounded-t-[3rem] p-6 border-t border-x border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.5)] animate-slide-up h-[70vh] flex flex-col overflow-hidden">
-            <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-8 shrink-0"></div>
+          <div className="absolute inset-0 bg-black/30 dark:bg-black/60 backdrop-blur-sm" onClick={() => setShowPlaylist(false)}></div>
+          <div className="relative w-full max-w-md bg-surface-light dark:bg-surface-dark rounded-t-[3rem] p-6 border-t border-x border-slate-200 dark:border-white/10 shadow-2xl animate-slide-up h-[70vh] flex flex-col overflow-hidden">
+            <div className="w-12 h-1.5 bg-slate-200 dark:bg-white/10 rounded-full mx-auto mb-8 shrink-0"></div>
             <div className="flex justify-between items-center mb-6 px-4 shrink-0">
               <h3 className="text-xl font-black">Segment Collection</h3>
-              <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">{editedSegments.length} items</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-gray-500">{editedSegments.length} items</span>
             </div>
             <div className="flex-1 overflow-y-auto no-scrollbar space-y-3 pb-12">
               {editedSegments.map((seg, idx) => (
-                <div key={seg.id} onClick={() => jumpToSegment(idx)} className={`p-5 rounded-3xl border transition-all active:scale-[0.98] cursor-pointer ${activeIdx === idx ? 'bg-accent/10 border-accent/20' : 'bg-white/5 border-transparent hover:bg-white/10'}`}>
+                <div key={seg.id} onClick={() => jumpToSegment(idx)} className={`p-5 rounded-3xl border transition-all active:scale-[0.98] cursor-pointer ${activeIdx === idx ? 'bg-accent/10 border-accent/20' : 'bg-slate-50 dark:bg-white/5 border-transparent'}`}>
                   <div className="flex justify-between items-center mb-2">
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${activeIdx === idx ? 'text-accent' : 'text-gray-500'}`}>Segment {idx + 1}</span>
-                    <span className="text-[9px] font-black tabular-nums text-gray-400">{Math.floor(seg.startTime)}s</span>
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${activeIdx === idx ? 'text-accent' : 'text-slate-400 dark:text-gray-500'}`}>Segment {idx + 1}</span>
+                    <span className="text-[9px] font-black tabular-nums text-slate-400 dark:text-gray-400">{Math.floor(seg.startTime)}s</span>
                   </div>
-                  <p className={`text-sm font-bold line-clamp-2 leading-relaxed ${activeIdx === idx ? 'text-white' : 'text-gray-400'}`}>{seg.text}</p>
+                  <p className={`text-sm font-bold line-clamp-2 leading-relaxed ${activeIdx === idx ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-gray-400'}`}>{seg.text}</p>
                 </div>
               ))}
             </div>
@@ -321,28 +317,28 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
       )}
 
       <header className="px-6 pt-12 pb-4 flex justify-between items-center z-20 shrink-0">
-        <button onClick={() => navigate('/')} className="size-10 flex items-center justify-center rounded-xl bg-white/5"><span className="material-symbols-outlined">expand_more</span></button>
-        <div className="flex bg-white/5 rounded-xl p-1 border border-white/5">
+        <button onClick={() => navigate('/')} className="size-10 flex items-center justify-center rounded-xl bg-slate-200/50 dark:bg-white/5 text-slate-600 dark:text-white shadow-sm dark:shadow-none transition-all active:scale-90"><span className="material-symbols-outlined">expand_more</span></button>
+        <div className="flex bg-slate-200/50 dark:bg-white/5 rounded-xl p-1 border border-slate-200/50 dark:border-white/5 shadow-sm dark:shadow-none">
            {[{ id: PlayerMode.VINYL, icon: 'album' }, { id: PlayerMode.LYRICS, icon: 'segment' }, { id: PlayerMode.CONTEXT, icon: 'article' }].map(m => (
-             <button key={m.id} onClick={() => setMode(m.id)} className={`size-10 rounded-lg flex items-center justify-center transition-all ${mode === m.id ? 'bg-accent text-black shadow-lg shadow-accent/10' : 'text-white/40'}`}><span className="material-symbols-outlined text-xl">{m.icon}</span></button>
+             <button key={m.id} onClick={() => setMode(m.id)} className={`size-10 rounded-lg flex items-center justify-center transition-all ${mode === m.id ? 'bg-slate-900 dark:bg-accent text-white dark:text-black shadow-lg shadow-accent/10' : 'text-slate-400 dark:text-white/40'}`}><span className="material-symbols-outlined text-xl">{m.icon}</span></button>
            ))}
         </div>
         <div className="flex gap-2">
-           <button onClick={() => isEditMode ? (onUpdateSession(session.id, { segments: editedSegments }), setIsEditMode(false)) : setIsEditMode(true)} className={`size-10 rounded-xl flex items-center justify-center transition-all ${isEditMode ? 'bg-green-500 text-white' : 'bg-white/5 text-white/40'}`}><span className="material-symbols-outlined text-lg">{isEditMode ? 'check' : 'edit_note'}</span></button>
-           <button onClick={() => setSpeed(s => s >= 2 ? 0.5 : s + 0.25)} className="size-10 rounded-xl bg-white/5 text-[10px] font-black">{speed}x</button>
+           <button onClick={() => isEditMode ? (onUpdateSession(session.id, { segments: editedSegments }), setIsEditMode(false)) : setIsEditMode(true)} className={`size-10 rounded-xl flex items-center justify-center transition-all ${isEditMode ? 'bg-green-500 text-white' : 'bg-slate-200/50 dark:bg-white/5 text-slate-400 dark:text-white/40'}`}><span className="material-symbols-outlined text-lg">{isEditMode ? 'check' : 'edit_note'}</span></button>
+           <button onClick={() => setSpeed(s => s >= 2 ? 0.5 : s + 0.25)} className="size-10 rounded-xl bg-slate-200/50 dark:bg-white/5 text-[10px] font-black text-slate-900 dark:text-white">{speed}x</button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto no-scrollbar px-6" ref={scrollRef}>
         {mode === PlayerMode.VINYL && (
           <div className="h-full flex flex-col items-center justify-center py-10 space-y-12 animate-fade-in">
-             <div className={`size-64 rounded-full bg-gradient-to-tr from-gray-900 to-black p-1 shadow-[0_20px_50px_rgba(0,0,0,0.8)] border border-white/5 relative flex items-center justify-center ${isPlaying ? 'animate-spin-slow' : ''}`}>
-               <div className="size-full rounded-full overflow-hidden border-2 border-white/10"><img src={session.coverUrl} className="size-full object-cover opacity-50" alt="" /></div>
-               <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,_transparent_40%,_black_90%)]"></div>
-               <div className="absolute size-10 rounded-full bg-[#181C21] border-2 border-white/10 flex items-center justify-center shadow-inner"><div className="size-2 rounded-full bg-accent"></div></div>
+             <div className={`size-64 rounded-full bg-gradient-to-tr from-slate-200 dark:from-gray-900 to-slate-400 dark:to-black p-1 shadow-2xl border border-slate-200 dark:border-white/5 relative flex items-center justify-center ${isPlaying ? 'animate-spin-slow' : ''}`}>
+               <div className="size-full rounded-full overflow-hidden border-2 border-white/10"><img src={session.coverUrl} className="size-full object-cover opacity-80 dark:opacity-50" alt="" /></div>
+               <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.1)_90%)] dark:bg-[radial-gradient(circle_at_center,_transparent_40%,_black_90%)]"></div>
+               <div className="absolute size-10 rounded-full bg-white dark:bg-[#181C21] border-2 border-slate-200 dark:border-white/10 flex items-center justify-center shadow-inner"><div className="size-2 rounded-full bg-accent"></div></div>
              </div>
              <div className="text-center max-w-sm px-4">
-               <h4 className="text-xl font-black text-white leading-relaxed">{renderTextWithClicks(editedSegments[activeIdx], currentTime, '#FFF', '#888', 'current')}</h4>
+               <h4 className="text-xl font-black leading-relaxed">{renderTextWithClicks(editedSegments[activeIdx], currentTime, '#00E4FF', '#94A3B8', 'current')}</h4>
                <p className="text-[10px] uppercase font-black tracking-widest text-accent mt-4">Now Playing</p>
              </div>
           </div>
@@ -353,7 +349,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
             {editedSegments.map((seg, idx) => (
               <div key={seg.id} data-seg-idx={idx} onClick={() => jumpToSegment(idx)} className={`transition-all duration-700 cursor-pointer ${activeIdx === idx ? 'scale-110 opacity-100' : 'scale-95 opacity-20 hover:opacity-40 blur-[0.5px]'}`}>
                 <div className="text-3xl font-black leading-tight tracking-tighter">
-                  {renderTextWithClicks(seg, currentTime, '#00E4FF', '#FFFFFF', idx < activeIdx ? 'past' : idx === activeIdx ? 'current' : 'future')}
+                  {renderTextWithClicks(seg, currentTime, '#00E4FF', '#1E293B', idx < activeIdx ? 'past' : idx === activeIdx ? 'current' : 'future')}
                 </div>
               </div>
             ))}
@@ -373,9 +369,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
                       const absIdx = block.startIdx + sIdx;
                       return (
                         <div key={seg.id} data-seg-idx={absIdx} className="w-full">
-                          {isEditMode ? <textarea value={seg.text} onChange={(e) => { const n = [...editedSegments]; n[absIdx] = { ...n[absIdx], text: e.target.value }; setEditedSegments(n); }} className="w-full bg-white/5 border border-white/10 rounded-2xl p-5 text-sm font-bold focus:ring-1 focus:ring-accent outline-none text-white leading-relaxed" rows={2} /> : 
+                          {isEditMode ? <textarea value={seg.text} onChange={(e) => { const n = [...editedSegments]; n[absIdx] = { ...n[absIdx], text: e.target.value }; setEditedSegments(n); }} className="w-full bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-5 text-sm font-bold focus:ring-1 focus:ring-accent outline-none text-slate-900 dark:text-white leading-relaxed" rows={2} /> : 
                           <div className="text-xl font-bold leading-relaxed tracking-tight" onClick={() => jumpToSegment(absIdx)}>
-                            {renderTextWithClicks(seg, currentTime, '#00E4FF', '#FFFFFF', absIdx < activeIdx ? 'past' : absIdx === activeIdx ? 'current' : 'future')}
+                            {renderTextWithClicks(seg, currentTime, '#00E4FF', '#1E293B', absIdx < activeIdx ? 'past' : absIdx === activeIdx ? 'current' : 'future')}
                           </div>}
                         </div>
                       );
@@ -388,12 +384,12 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         )}
       </div>
 
-      <footer className="px-8 pb-12 pt-6 bg-[#181C21] border-t border-white/5 z-20 shrink-0">
-        <div className="flex justify-between text-[10px] font-black text-gray-500 mb-4 tracking-widest uppercase tabular-nums">
+      <footer className="px-8 pb-12 pt-6 bg-background-light dark:bg-background-dark border-t border-slate-200 dark:border-white/5 z-20 shrink-0 transition-colors duration-500">
+        <div className="flex justify-between text-[10px] font-black text-slate-400 dark:text-gray-500 mb-4 tracking-widest uppercase tabular-nums">
           <span>{Math.floor(currentTime/60)}:{(currentTime%60).toFixed(0).padStart(2,'0')}</span>
           <span>{Math.floor(session.duration/60)}:{(session.duration%60).toFixed(0).padStart(2,'0')}</span>
         </div>
-        <div className="h-1 bg-white/5 rounded-full mb-8 cursor-pointer relative" onClick={(e) => {
+        <div className="h-1 bg-slate-200 dark:bg-white/5 rounded-full mb-8 cursor-pointer relative" onClick={(e) => {
           if (isEditMode) return;
           const rect = e.currentTarget.getBoundingClientRect();
           const p = (e.clientX - rect.left) / rect.width;
@@ -402,19 +398,19 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
           <div className="h-full bg-accent transition-all duration-200" style={{ width: `${(currentTime/session.duration)*100}%` }}></div>
         </div>
         <div className="flex items-center justify-between">
-           <button onClick={togglePlaybackMode} className="size-12 rounded-xl flex items-center justify-center transition-all active:scale-90">
+           <button onClick={togglePlaybackMode} className="size-12 rounded-xl flex items-center justify-center transition-all active:scale-90 text-slate-400 dark:text-white">
              <PlaybackModeIcon />
            </button>
            
            <div className="flex items-center gap-8">
-             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime -= 5 }} className="material-symbols-outlined text-3xl text-white/30 active:scale-90 transition-transform">replay_5</button>
-             <button onClick={() => setIsPlaying(!isPlaying)} className="size-20 rounded-full bg-white text-black flex items-center justify-center shadow-xl active:scale-90 transition-all">
+             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime -= 5 }} className="material-symbols-outlined text-3xl text-slate-300 dark:text-white/30 active:scale-90 transition-transform">replay_5</button>
+             <button onClick={() => setIsPlaying(!isPlaying)} className="size-20 rounded-full bg-slate-900 dark:bg-white text-white dark:text-black flex items-center justify-center shadow-xl active:scale-90 transition-all">
                <span className="material-symbols-outlined text-5xl fill-1">{isPlaying ? 'pause' : 'play_arrow'}</span>
              </button>
-             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime += 5 }} className="material-symbols-outlined text-3xl text-white/30 active:scale-90 transition-transform">forward_5</button>
+             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime += 5 }} className="material-symbols-outlined text-3xl text-slate-300 dark:text-white/30 active:scale-90 transition-transform">forward_5</button>
            </div>
 
-           <button onClick={() => setShowPlaylist(true)} className="size-12 rounded-xl flex items-center justify-center text-white/30 active:scale-90 transition-all">
+           <button onClick={() => setShowPlaylist(true)} className="size-12 rounded-xl flex items-center justify-center text-slate-300 dark:text-white/30 active:scale-90 transition-all">
              <span className="material-symbols-outlined">format_list_bulleted</span>
            </button>
         </div>
