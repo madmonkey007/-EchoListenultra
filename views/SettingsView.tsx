@@ -12,6 +12,12 @@ const LANGUAGES = [
   { code: 'de', name: 'German' },
 ];
 
+const GEMINI_MODELS = [
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash (Fast)' },
+  { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro (Complex)' },
+  { id: 'gemini-2.5-flash-lite-latest', name: 'Gemini 2.5 Lite' }
+];
+
 interface SettingsViewProps {
   sessions?: AudioSession[];
   apiConfig: AIProviderConfig;
@@ -89,10 +95,54 @@ const SettingsView: React.FC<SettingsViewProps> = ({ sessions = [], apiConfig, o
         </div>
       </section>
 
-      {/* Preference Settings */}
-      <section className="bg-surface-light dark:bg-surface-dark/40 p-6 rounded-[2.5rem] border border-slate-200 dark:border-white/5 space-y-6 shadow-sm dark:shadow-none">
+      {/* Dynamic API Config */}
+      <section className="bg-surface-light dark:bg-surface-dark/40 p-6 rounded-[2.5rem] border border-slate-200 dark:border-white/5 space-y-6 shadow-sm dark:shadow-none animate-fade-in">
+        
+        {localConfig.provider === 'gemini' ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest ml-1">Gemini Intelligence Model</label>
+              <div className="relative">
+                <select 
+                  value={localConfig.geminiModel}
+                  onChange={(e) => updateConfig({ geminiModel: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-white/5 rounded-xl py-4 px-5 text-sm text-slate-900 dark:text-white appearance-none outline-none cursor-pointer focus:ring-1 focus:ring-accent"
+                >
+                  {GEMINI_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <span className="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 pointer-events-none">expand_more</span>
+              </div>
+            </div>
+            <p className="text-[10px] text-primary dark:text-accent/60 uppercase tracking-widest font-bold px-1">
+              * Using system-wide environment API_KEY
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest ml-1">Deepgram API Key</label>
+              <input 
+                type="password"
+                placeholder="Enter your Deepgram Key"
+                value={localConfig.deepgramApiKey}
+                onChange={(e) => updateConfig({ deepgramApiKey: e.target.value })}
+                className="w-full bg-slate-50 dark:bg-background-dark border border-slate-200 dark:border-white/5 rounded-xl py-4 px-5 text-sm text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-accent placeholder:text-slate-300 dark:placeholder:text-gray-700"
+              />
+            </div>
+            <div className="flex items-center gap-2 p-3 bg-accent/5 rounded-xl border border-accent/10">
+              <span className="material-symbols-outlined text-accent text-sm">info</span>
+              <p className="text-[9px] text-accent/80 font-bold uppercase tracking-widest">Required for Nova-3 ASR Engine</p>
+            </div>
+          </div>
+        )}
+
+        <div className="h-px bg-slate-100 dark:bg-white/5 mx-2"></div>
+
+        {/* Global Preference: Language */}
         <div className="space-y-2">
-          <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest ml-1">Learning Language</label>
+          <label className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest ml-1">Target Language</label>
           <div className="relative">
             <select 
               value={localConfig.deepgramLanguage}
@@ -105,21 +155,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ sessions = [], apiConfig, o
             </select>
             <span className="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 pointer-events-none">expand_more</span>
           </div>
-        </div>
-
-        <div className="space-y-4">
-           <div className="flex items-center gap-3">
-             <div className="size-10 rounded-xl bg-slate-100 dark:bg-background-dark flex items-center justify-center text-primary dark:text-accent">
-               <span className="material-symbols-outlined">auto_awesome</span>
-             </div>
-             <div>
-               <h4 className="font-black text-sm text-slate-900 dark:text-white">System Status</h4>
-               <p className="text-[10px] text-primary dark:text-green-400 uppercase tracking-widest font-black">Architecture Stable</p>
-             </div>
-           </div>
-           <p className="text-xs text-slate-500 dark:text-gray-400 leading-relaxed italic">
-             "Using the system's pre-configured intelligence engine for high-speed transcription and analysis."
-           </p>
         </div>
       </section>
 
