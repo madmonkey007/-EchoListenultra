@@ -6,6 +6,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const SPEAKER_COLORS = ["text-accent", "text-indigo-400", "text-emerald-400", "text-orange-400", "text-pink-400"];
 const LATENCY_COMPENSATION = 0.05;
+const SEEK_STEP = 15; 
 
 let globalTTSContext: AudioContext | null = null;
 const getTTSContext = () => {
@@ -93,6 +94,33 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
   const scrollRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
 
+  // Background Media Session support
+  useEffect(() => {
+    if ('mediaSession' in navigator && isSourceReady) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: session.title,
+        artist: session.subtitle,
+        artwork: [{ src: session.coverUrl, sizes: '512x512', type: 'image/jpeg' }]
+      });
+
+      navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
+      navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
+      navigator.mediaSession.setActionHandler('seekbackward', () => { if(audioRef.current) audioRef.current.currentTime -= SEEK_STEP });
+      navigator.mediaSession.setActionHandler('seekforward', () => { if(audioRef.current) audioRef.current.currentTime += SEEK_STEP });
+      navigator.mediaSession.setActionHandler('previoustrack', () => jumpToSegment(Math.max(0, activeIdx - 1)));
+      navigator.mediaSession.setActionHandler('nexttrack', () => jumpToSegment(Math.min(editedSegments.length - 1, activeIdx + 1)));
+    }
+  }, [session, isSourceReady, activeIdx, editedSegments]);
+
+  // Unified Scroll behavior - ALWAYS centers the active segment
+  useEffect(() => {
+    if (!scrollRef.current || isEditMode) return;
+    const activeEl = scrollRef.current.querySelector(`[data-seg-idx="${activeIdx}"]`);
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activeIdx, mode, isEditMode]);
+
   const handleAudioEnded = () => {
     if (!audioRef.current) return;
     if (playbackMode === PlaybackMode.SINGLE_LOOP) {
@@ -101,9 +129,11 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
     } else if (playbackMode === PlaybackMode.SHUFFLE) {
       const next = Math.floor(Math.random() * editedSegments.length);
       jumpToSegment(next);
-    } else {
+    } else if (playbackMode === PlaybackMode.LIST_LOOP) {
       if (activeIdx < editedSegments.length - 1) jumpToSegment(activeIdx + 1);
-      else setIsPlaying(false);
+      else jumpToSegment(0);
+    } else {
+      setIsPlaying(false);
     }
   };
 
@@ -134,11 +164,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
   useEffect(() => {
     if (audioRef.current && isSourceReady) {
       audioRef.current.playbackRate = speed;
-      if (isPlaying) {
-        audioRef.current.play().catch(() => setIsPlaying(false));
-      } else {
-        audioRef.current.pause();
-      }
+      if (isPlaying) audioRef.current.play().catch(() => setIsPlaying(false));
+      else audioRef.current.pause();
     }
   }, [isPlaying, isSourceReady, speed]);
 
@@ -150,24 +177,31 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         
         if (playbackMode === PlaybackMode.SINGLE_LOOP) {
           const seg = editedSegments[activeIdx];
-          if (time >= seg.endTime) audioRef.current.currentTime = seg.startTime;
+          if (time >= seg.endTime - 0.1) {
+            audioRef.current.currentTime = seg.startTime;
+            rafRef.current = requestAnimationFrame(sync);
+            return; 
+          }
         }
 
         const adjustedTime = time + (isPlaying ? LATENCY_COMPENSATION : 0);
         const idx = editedSegments.findIndex(s => adjustedTime >= s.startTime && adjustedTime < s.endTime);
-        if (idx !== -1 && idx !== activeIdx) {
-          setActiveIdx(idx);
-          if (scrollRef.current && !isEditMode) {
-            const activeEl = scrollRef.current.querySelector(`[data-seg-idx="${idx}"]`);
-            if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-        }
+        if (idx !== -1 && idx !== activeIdx) setActiveIdx(idx);
       }
       rafRef.current = requestAnimationFrame(sync);
     };
     rafRef.current = requestAnimationFrame(sync);
     return () => cancelAnimationFrame(rafRef.current);
   }, [editedSegments, isSourceReady, isEditMode, activeIdx, isPlaying, playbackMode]);
+
+  const jumpToSegment = (idx: number) => {
+    if (audioRef.current && isSourceReady) {
+      audioRef.current.currentTime = editedSegments[idx].startTime;
+      setActiveIdx(idx);
+      if (!isPlaying) setIsPlaying(true);
+      setShowPlaylist(false);
+    }
+  };
 
   const handleWordClick = async (word: string, sentence: string) => {
     if (isEditMode) return;
@@ -186,54 +220,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
     } catch (e) { setSelectedWord(null); }
   };
 
-  const playWordAudio = async () => {
-    if (!selectedWord || isSpeaking) return;
-    setIsSpeaking(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Say clearly: ${selectedWord.word}` }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-        },
-      });
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        const ctx = getTTSContext();
-        if (ctx.state === 'suspended') await ctx.resume();
-        const audioBuffer = await decodeAudioData(decodeBase64(base64Audio), ctx, 24000, 1);
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ctx.destination);
-        source.onended = () => setIsSpeaking(false);
-        source.start();
-      } else {
-        setIsSpeaking(false);
-      }
-    } catch (e) { setIsSpeaking(false); }
-  };
-
-  const jumpToSegment = (idx: number) => {
-    if (audioRef.current && isSourceReady) {
-      audioRef.current.currentTime = editedSegments[idx].startTime;
-      setActiveIdx(idx);
-      if (!isPlaying) setIsPlaying(true);
-      setShowPlaylist(false);
-    }
-  };
-
-  const togglePlaybackMode = () => {
-    if (playbackMode === PlaybackMode.LIST_LOOP) setPlaybackMode(PlaybackMode.SINGLE_LOOP);
-    else if (playbackMode === PlaybackMode.SINGLE_LOOP) setPlaybackMode(PlaybackMode.SHUFFLE);
-    else setPlaybackMode(PlaybackMode.LIST_LOOP);
-  };
-
   const renderTextWithClicks = (segment: AudioSegment, currentTime: number, activeColor: string, dimColor: string, state: string) => {
     const { text, words: wordTimings, startTime, endTime } = segment;
     const tokens = text.split(/\s+/);
-    const lowerSavedWords = savedWords.map(w => w.word.toLowerCase());
     const adjustedTime = currentTime + LATENCY_COMPENSATION;
     const hasWordTimings = wordTimings && wordTimings.length === tokens.length;
     
@@ -254,14 +243,12 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
     }
 
     return (
-      <div className="flex flex-wrap items-center w-full">
+      <div className="flex flex-wrap items-center w-full justify-center">
         {tokens.map((w, idx) => {
           const { start, end } = tokenBoundaries[idx];
           let fillPercent = state === 'past' || adjustedTime >= end ? 100 : state === 'current' && adjustedTime >= start && adjustedTime < end ? ((adjustedTime - start) / (end - start)) * 100 : 0;
-          const cleanWord = w.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").toLowerCase();
-          const isSaved = lowerSavedWords.includes(cleanWord);
           return (
-            <span key={idx} onClick={(ev) => { ev.stopPropagation(); handleWordClick(w, text); }} className={`relative cursor-pointer py-0.5 px-0.5 mr-1.5 transition-all select-text ${isSaved ? 'border-b-2 border-accent shadow-[0_4px_0_-2px_rgba(0,228,255,0.4)]' : ''}`} style={{ backgroundImage: `linear-gradient(90deg, ${isSaved ? '#00E4FF' : activeColor} ${fillPercent}%, ${isSaved ? 'rgba(0,228,255,0.3)' : dimColor} ${fillPercent}%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', fontWeight: isSaved ? '900' : 'inherit' }}>{w}</span>
+            <span key={idx} onClick={(ev) => { ev.stopPropagation(); handleWordClick(w, text); }} className="relative cursor-pointer py-0.5 px-0.5 mr-1.5 transition-all select-text" style={{ backgroundImage: `linear-gradient(90deg, ${activeColor} ${fillPercent}%, ${dimColor} ${fillPercent}%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>{w}</span>
           );
         })}
       </div>
@@ -281,12 +268,13 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         <div className="absolute inset-0 z-[200] flex items-end justify-center animate-fade-in p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-md" onClick={() => setSelectedWord(null)}></div>
           <div className="relative w-full max-w-md bg-surface-light dark:bg-surface-dark rounded-[3rem] p-10 border border-slate-200 dark:border-white/10 shadow-2xl animate-slide-up mb-24">
-            <div className="flex justify-between items-start mb-4">
-              <div><h3 className="text-4xl font-black mb-1">{selectedWord.word}</h3><p className="text-accent text-sm italic font-medium">{selectedWord.phonetic}</p></div>
-              <button onClick={playWordAudio} className={`size-14 rounded-full flex items-center justify-center transition-all ${isSpeaking ? 'bg-accent text-black' : 'bg-slate-100 dark:bg-white/5 text-slate-900 dark:text-white'}`}><span className="material-symbols-outlined text-2xl fill-1">{isSpeaking ? 'volume_up' : 'volume_down'}</span></button>
+            <h3 className="text-4xl font-black mb-1 text-slate-900 dark:text-white">{selectedWord.word}</h3>
+            <p className="text-accent text-sm italic font-medium mb-4">{selectedWord.phonetic}</p>
+            <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-3xl mb-8 border border-slate-100 dark:border-white/5">
+              <p className="text-slate-900 dark:text-white text-xl font-black mb-2">{selectedWord.translation}</p>
+              <p className="text-slate-500 dark:text-gray-400 text-sm leading-relaxed">{selectedWord.definition}</p>
             </div>
-            <div className="bg-slate-50 dark:bg-white/5 p-6 rounded-3xl mb-8 border border-slate-100 dark:border-white/5"><p className="text-slate-900 dark:text-white text-xl font-black mb-2">{selectedWord.translation}</p><p className="text-slate-500 dark:text-gray-400 text-sm leading-relaxed">{selectedWord.definition}</p></div>
-            <button onClick={() => toggleWord(selectedWord.word, session.id, selectedWord)} className={`w-full py-5 rounded-2xl font-black uppercase text-xs tracking-[0.2em] transition-all active:scale-95 ${savedWords.some(w => w.word.toLowerCase() === selectedWord.word.toLowerCase()) ? 'bg-slate-200 dark:bg-white/10 text-slate-900 dark:text-white' : 'bg-slate-900 dark:bg-accent text-white dark:text-black shadow-xl'}`}>{savedWords.some(w => w.word.toLowerCase() === selectedWord.word.toLowerCase()) ? 'Remove from Saved' : 'Save to Folder'}</button>
+            <button onClick={() => toggleWord(selectedWord.word, session.id, selectedWord)} className="w-full py-5 rounded-2xl bg-slate-900 dark:bg-accent text-white dark:text-black font-black uppercase text-xs tracking-widest shadow-xl">Save to Vocabulary</button>
           </div>
         </div>
       )}
@@ -294,42 +282,41 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
       {/* Playlist Drawer */}
       {showPlaylist && (
         <div className="absolute inset-0 z-[150] flex items-end justify-center animate-fade-in p-4">
-          <div className="absolute inset-0 bg-black/30 dark:bg-black/60 backdrop-blur-sm" onClick={() => setShowPlaylist(false)}></div>
-          <div className="relative w-full max-w-md bg-surface-light dark:bg-surface-dark rounded-t-[3rem] p-6 border-t border-x border-slate-200 dark:border-white/10 shadow-2xl animate-slide-up h-[70vh] flex flex-col overflow-hidden">
-            <div className="w-12 h-1.5 bg-slate-200 dark:bg-white/10 rounded-full mx-auto mb-8 shrink-0"></div>
-            <div className="flex justify-between items-center mb-6 px-4 shrink-0">
-              <h3 className="text-xl font-black">Segment Collection</h3>
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-gray-500">{editedSegments.length} items</span>
-            </div>
-            <div className="flex-1 overflow-y-auto no-scrollbar space-y-3 pb-12">
-              {editedSegments.map((seg, idx) => (
-                <div key={seg.id} onClick={() => jumpToSegment(idx)} className={`p-5 rounded-3xl border transition-all active:scale-[0.98] cursor-pointer ${activeIdx === idx ? 'bg-accent/10 border-accent/20' : 'bg-slate-50 dark:bg-white/5 border-transparent'}`}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${activeIdx === idx ? 'text-accent' : 'text-slate-400 dark:text-gray-500'}`}>Segment {idx + 1}</span>
-                    <span className="text-[9px] font-black tabular-nums text-slate-400 dark:text-gray-400">{Math.floor(seg.startTime)}s</span>
-                  </div>
-                  <p className={`text-sm font-bold line-clamp-2 leading-relaxed ${activeIdx === idx ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-gray-400'}`}>{seg.text}</p>
-                </div>
-              ))}
-            </div>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-md" onClick={() => setShowPlaylist(false)}></div>
+          <div className="relative w-full max-w-md bg-surface-light dark:bg-surface-dark rounded-t-[3rem] p-6 border-t border-x border-slate-200 dark:border-white/10 shadow-2xl animate-slide-up h-[75vh] flex flex-col overflow-hidden pointer-events-auto">
+             <div className="w-12 h-1.5 bg-slate-200 dark:bg-white/10 rounded-full mx-auto mb-8 shrink-0"></div>
+             <div className="flex justify-between items-center mb-6 px-4 shrink-0">
+               <h3 className="text-xl font-black text-slate-900 dark:text-white">Segment Selection</h3>
+               <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-gray-500">{editedSegments.length} segments</span>
+             </div>
+             <div className="flex-1 overflow-y-auto no-scrollbar space-y-3 pb-12 px-2">
+               {editedSegments.map((seg, idx) => (
+                 <div key={seg.id} onClick={() => jumpToSegment(idx)} className={`p-5 rounded-[2rem] border transition-all active:scale-[0.98] cursor-pointer ${activeIdx === idx ? 'bg-accent/10 border-accent/20' : 'bg-slate-50 dark:bg-white/5 border-transparent'}`}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className={`text-[10px] font-black uppercase tracking-widest ${activeIdx === idx ? 'text-accent' : 'text-slate-400 dark:text-gray-500'}`}>Part {idx + 1}</span>
+                      <span className="text-[9px] font-black tabular-nums text-slate-400 dark:text-gray-400">{Math.floor(seg.startTime/60)}:{Math.floor(seg.startTime%60).toString().padStart(2,'0')}</span>
+                    </div>
+                    <p className={`text-sm font-bold line-clamp-2 leading-relaxed ${activeIdx === idx ? 'text-slate-900 dark:text-white' : 'text-slate-400 dark:text-gray-400'}`}>{seg.text}</p>
+                 </div>
+               ))}
+             </div>
           </div>
         </div>
       )}
 
+      {/* Header with Mode Switches */}
       <header className="px-6 pt-12 pb-4 flex justify-between items-center z-20 shrink-0">
-        <button onClick={() => navigate('/')} className="size-10 flex items-center justify-center rounded-xl bg-slate-200/50 dark:bg-white/5 text-slate-600 dark:text-white shadow-sm dark:shadow-none transition-all active:scale-90"><span className="material-symbols-outlined">expand_more</span></button>
-        <div className="flex bg-slate-200/50 dark:bg-white/5 rounded-xl p-1 border border-slate-200/50 dark:border-white/5 shadow-sm dark:shadow-none">
+        <button onClick={() => navigate('/')} className="size-10 flex items-center justify-center rounded-xl bg-slate-200/50 dark:bg-white/5 text-slate-600 dark:text-white shadow-sm transition-all active:scale-90"><span className="material-symbols-outlined">expand_more</span></button>
+        <div className="flex bg-slate-200/50 dark:bg-white/5 rounded-xl p-1 border border-slate-200/50 dark:border-white/5 shadow-sm">
            {[{ id: PlayerMode.VINYL, icon: 'album' }, { id: PlayerMode.LYRICS, icon: 'segment' }, { id: PlayerMode.CONTEXT, icon: 'article' }].map(m => (
-             <button key={m.id} onClick={() => setMode(m.id)} className={`size-10 rounded-lg flex items-center justify-center transition-all ${mode === m.id ? 'bg-slate-900 dark:bg-accent text-white dark:text-black shadow-lg shadow-accent/10' : 'text-slate-400 dark:text-white/40'}`}><span className="material-symbols-outlined text-xl">{m.icon}</span></button>
+             <button key={m.id} onClick={() => setMode(m.id)} className={`size-10 rounded-lg flex items-center justify-center transition-all ${mode === m.id ? 'bg-slate-900 dark:bg-accent text-white dark:text-black' : 'text-slate-400 dark:text-white/40'}`}><span className="material-symbols-outlined text-xl">{m.icon}</span></button>
            ))}
         </div>
-        <div className="flex gap-2">
-           <button onClick={() => isEditMode ? (onUpdateSession(session.id, { segments: editedSegments }), setIsEditMode(false)) : setIsEditMode(true)} className={`size-10 rounded-xl flex items-center justify-center transition-all ${isEditMode ? 'bg-green-500 text-white' : 'bg-slate-200/50 dark:bg-white/5 text-slate-400 dark:text-white/40'}`}><span className="material-symbols-outlined text-lg">{isEditMode ? 'check' : 'edit_note'}</span></button>
-           <button onClick={() => setSpeed(s => s >= 2 ? 0.5 : s + 0.25)} className="size-10 rounded-xl bg-slate-200/50 dark:bg-white/5 text-[10px] font-black text-slate-900 dark:text-white">{speed}x</button>
-        </div>
+        <button onClick={() => setSpeed(s => s >= 2 ? 0.5 : s + 0.25)} className="size-10 rounded-xl bg-slate-200/50 dark:bg-white/5 text-[10px] font-black text-slate-900 dark:text-white">{speed}x</button>
       </header>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar px-6" ref={scrollRef}>
+      {/* Scrollable Viewport - Crucial for "Following Audio" */}
+      <div className="flex-1 overflow-y-auto no-scrollbar px-6 relative z-0" ref={scrollRef}>
         {mode === PlayerMode.VINYL && (
           <div className="h-full flex flex-col items-center justify-center py-10 space-y-12 animate-fade-in">
              <div className={`size-64 rounded-full bg-gradient-to-tr from-slate-200 dark:from-gray-900 to-slate-400 dark:to-black p-1 shadow-2xl border border-slate-200 dark:border-white/5 relative flex items-center justify-center ${isPlaying ? 'animate-spin-slow' : ''}`}>
@@ -337,17 +324,16 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
                <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,_transparent_40%,_rgba(0,0,0,0.1)_90%)] dark:bg-[radial-gradient(circle_at_center,_transparent_40%,_black_90%)]"></div>
                <div className="absolute size-10 rounded-full bg-white dark:bg-[#181C21] border-2 border-slate-200 dark:border-white/10 flex items-center justify-center shadow-inner"><div className="size-2 rounded-full bg-accent"></div></div>
              </div>
-             <div className="text-center max-w-sm px-4">
+             <div className="text-center max-w-sm px-4" data-seg-idx={activeIdx}>
                <h4 className="text-xl font-black leading-relaxed">{renderTextWithClicks(editedSegments[activeIdx], currentTime, '#00E4FF', '#94A3B8', 'current')}</h4>
-               <p className="text-[10px] uppercase font-black tracking-widest text-accent mt-4">Now Playing</p>
              </div>
           </div>
         )}
 
         {mode === PlayerMode.LYRICS && (
-          <div className="space-y-16 py-32 animate-fade-in">
+          <div className="space-y-16 py-[40vh] animate-fade-in">
             {editedSegments.map((seg, idx) => (
-              <div key={seg.id} data-seg-idx={idx} onClick={() => jumpToSegment(idx)} className={`transition-all duration-700 cursor-pointer ${activeIdx === idx ? 'scale-110 opacity-100' : 'scale-95 opacity-20 hover:opacity-40 blur-[0.5px]'}`}>
+              <div key={seg.id} data-seg-idx={idx} onClick={() => jumpToSegment(idx)} className={`transition-all duration-700 cursor-pointer text-center ${activeIdx === idx ? 'scale-110 opacity-100' : 'scale-90 opacity-20 blur-[2px]'}`}>
                 <div className="text-3xl font-black leading-tight tracking-tighter">
                   {renderTextWithClicks(seg, currentTime, '#00E4FF', '#1E293B', idx < activeIdx ? 'past' : idx === activeIdx ? 'current' : 'future')}
                 </div>
@@ -357,22 +343,18 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         )}
 
         {mode === PlayerMode.CONTEXT && (
-          <div className="space-y-12 pb-48 pt-6">
+          <div className="space-y-12 pb-48 pt-12">
             {dialogueBlocks.map((block, bIdx) => {
               const isBlockActive = activeIdx >= block.startIdx && activeIdx < block.startIdx + block.segments.length;
-              const speakerColor = SPEAKER_COLORS[(block.speaker - 1) % SPEAKER_COLORS.length];
               return (
-                <div key={bIdx} className={`transition-all duration-500 ${isBlockActive ? 'opacity-100' : 'opacity-20'}`}>
-                  <div className="flex items-center gap-3 mb-4"><div className={`text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 ${speakerColor}`}><span className="material-symbols-outlined text-xs">record_voice_over</span>Speaker {block.speaker}</div></div>
+                <div key={bIdx} className={`transition-all duration-500 ${isBlockActive ? 'opacity-100' : 'opacity-20 blur-none'}`}>
+                  <div className="flex items-center gap-3 mb-4"><div className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 text-accent"><span className="material-symbols-outlined text-xs">record_voice_over</span>Speaker {block.speaker}</div></div>
                   <div className="space-y-8">
                     {block.segments.map((seg, sIdx) => {
                       const absIdx = block.startIdx + sIdx;
                       return (
-                        <div key={seg.id} data-seg-idx={absIdx} className="w-full">
-                          {isEditMode ? <textarea value={seg.text} onChange={(e) => { const n = [...editedSegments]; n[absIdx] = { ...n[absIdx], text: e.target.value }; setEditedSegments(n); }} className="w-full bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-5 text-sm font-bold focus:ring-1 focus:ring-accent outline-none text-slate-900 dark:text-white leading-relaxed" rows={2} /> : 
-                          <div className="text-xl font-bold leading-relaxed tracking-tight" onClick={() => jumpToSegment(absIdx)}>
-                            {renderTextWithClicks(seg, currentTime, '#00E4FF', '#1E293B', absIdx < activeIdx ? 'past' : absIdx === activeIdx ? 'current' : 'future')}
-                          </div>}
+                        <div key={seg.id} data-seg-idx={absIdx} className={`text-xl font-bold leading-relaxed tracking-tight transition-all duration-500 ${activeIdx === absIdx ? 'scale-[1.02] text-slate-900 dark:text-white' : 'scale-100 text-slate-400 dark:text-slate-600'}`} onClick={() => jumpToSegment(absIdx)}>
+                          {renderTextWithClicks(seg, currentTime, '#00E4FF', '#1E293B', absIdx < activeIdx ? 'past' : absIdx === activeIdx ? 'current' : 'future')}
                         </div>
                       );
                     })}
@@ -384,33 +366,60 @@ const PlayerView: React.FC<PlayerViewProps> = ({ sessions, savedWords, toggleWor
         )}
       </div>
 
-      <footer className="px-8 pb-12 pt-6 bg-background-light dark:bg-background-dark border-t border-slate-200 dark:border-white/5 z-20 shrink-0 transition-colors duration-500">
+      {/* Fixed Footer UI */}
+      <footer className="px-8 pb-12 pt-6 bg-background-light dark:bg-background-dark border-t border-slate-200 dark:border-white/10 relative z-[101] shrink-0 transition-colors shadow-2xl pointer-events-auto">
         <div className="flex justify-between text-[10px] font-black text-slate-400 dark:text-gray-500 mb-4 tracking-widest uppercase tabular-nums">
           <span>{Math.floor(currentTime/60)}:{(currentTime%60).toFixed(0).padStart(2,'0')}</span>
           <span>{Math.floor(session.duration/60)}:{(session.duration%60).toFixed(0).padStart(2,'0')}</span>
         </div>
-        <div className="h-1 bg-slate-200 dark:bg-white/5 rounded-full mb-8 cursor-pointer relative" onClick={(e) => {
-          if (isEditMode) return;
+        
+        {/* Progress Bar */}
+        <div className="h-1 bg-slate-200 dark:bg-white/5 rounded-full mb-8 cursor-pointer relative group" onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const p = (e.clientX - rect.left) / rect.width;
           if (audioRef.current) audioRef.current.currentTime = p * session.duration;
         }}>
-          <div className="h-full bg-accent transition-all duration-200" style={{ width: `${(currentTime/session.duration)*100}%` }}></div>
+           <div className="absolute -inset-2 pointer-events-auto"></div>
+           <div className="h-full bg-accent transition-all duration-200 relative pointer-events-none" style={{ width: `${(currentTime/session.duration)*100}%` }}>
+             <div className="absolute right-0 top-1/2 -translate-y-1/2 size-3 rounded-full bg-accent opacity-0 group-hover:opacity-100 transition-opacity shadow-[0_0_8px_#00E4FF]"></div>
+           </div>
         </div>
-        <div className="flex items-center justify-between">
-           <button onClick={togglePlaybackMode} className="size-12 rounded-xl flex items-center justify-center transition-all active:scale-90 text-slate-400 dark:text-white">
+
+        {/* Controls Layout */}
+        <div className="flex items-center justify-between pointer-events-auto">
+           <button 
+             onClick={() => {
+               if (playbackMode === PlaybackMode.LIST_LOOP) setPlaybackMode(PlaybackMode.SINGLE_LOOP);
+               else if (playbackMode === PlaybackMode.SINGLE_LOOP) setPlaybackMode(PlaybackMode.SHUFFLE);
+               else setPlaybackMode(PlaybackMode.LIST_LOOP);
+             }} 
+             className="size-14 rounded-2xl flex items-center justify-center transition-all active:scale-90 text-slate-400 dark:text-white"
+           >
              <PlaybackModeIcon />
            </button>
            
-           <div className="flex items-center gap-8">
-             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime -= 5 }} className="material-symbols-outlined text-3xl text-slate-300 dark:text-white/30 active:scale-90 transition-transform">replay_5</button>
+           <div className="flex items-center gap-6">
+             {/* Styled 15s Rewind */}
+             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime -= SEEK_STEP }} className="relative size-12 flex items-center justify-center text-slate-400 dark:text-white active:scale-90 transition-transform">
+                <span className="material-symbols-outlined text-4xl">replay</span>
+                <span className="absolute inset-0 flex items-center justify-center pt-1.5 text-[8px] font-black text-slate-900 dark:text-white pointer-events-none select-none">15</span>
+             </button>
+
              <button onClick={() => setIsPlaying(!isPlaying)} className="size-20 rounded-full bg-slate-900 dark:bg-white text-white dark:text-black flex items-center justify-center shadow-xl active:scale-90 transition-all">
                <span className="material-symbols-outlined text-5xl fill-1">{isPlaying ? 'pause' : 'play_arrow'}</span>
              </button>
-             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime += 5 }} className="material-symbols-outlined text-3xl text-slate-300 dark:text-white/30 active:scale-90 transition-transform">forward_5</button>
+
+             {/* Styled 15s Forward */}
+             <button onClick={() => { if(audioRef.current) audioRef.current.currentTime += SEEK_STEP }} className="relative size-12 flex items-center justify-center text-slate-400 dark:text-white active:scale-90 transition-transform">
+                <span className="material-symbols-outlined text-4xl">forward</span>
+                <span className="absolute inset-0 flex items-center justify-center pt-1.5 text-[8px] font-black text-slate-900 dark:text-white pointer-events-none select-none">15</span>
+             </button>
            </div>
 
-           <button onClick={() => setShowPlaylist(true)} className="size-12 rounded-xl flex items-center justify-center text-slate-300 dark:text-white/30 active:scale-90 transition-all">
+           <button 
+             onClick={() => setShowPlaylist(true)} 
+             className="size-14 rounded-2xl flex items-center justify-center text-slate-400 dark:text-white active:scale-90 transition-all hover:bg-slate-100 dark:hover:bg-white/5 z-[110]"
+           >
              <span className="material-symbols-outlined">format_list_bulleted</span>
            </button>
         </div>

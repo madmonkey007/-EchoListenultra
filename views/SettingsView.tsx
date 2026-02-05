@@ -51,7 +51,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ sessions = [], apiConfig, o
   const hasDeepgramKey = localConfig.deepgramApiKey && localConfig.deepgramApiKey.trim().length > 10;
 
   return (
-    <div className="p-6 space-y-8 animate-fade-in pb-32 min-h-full">
+    <div className="p-6 space-y-8 animate-fade-in pb-32 min-h-full bg-background-light dark:bg-background-dark">
       <header className="flex justify-between items-center mb-6 pt-4">
         <div className="flex items-center gap-4">
            <button onClick={() => navigate('/')} className="size-10 flex items-center justify-center rounded-xl bg-surface-light dark:bg-surface-dark border border-slate-200 dark:border-white/5 active:scale-90 transition-transform shadow-sm dark:shadow-none">
@@ -79,13 +79,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({ sessions = [], apiConfig, o
         <div className="grid grid-cols-2 bg-surface-light dark:bg-surface-dark p-1 rounded-2xl border border-slate-200 dark:border-white/5 shadow-sm">
           <button 
             onClick={() => updateConfig({ provider: 'gemini' })}
-            className={`py-3 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${localConfig.provider === 'gemini' ? 'bg-slate-900 dark:bg-primary text-white' : 'text-slate-400 dark:text-gray-500'}`}
+            className={`py-3 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${localConfig.provider === 'gemini' ? 'bg-slate-900 dark:bg-primary text-white shadow-md' : 'text-slate-400 dark:text-gray-500'}`}
           >
             Built-in Engine
           </button>
           <button 
             onClick={() => updateConfig({ provider: 'deepgram' })}
-            className={`py-3 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${localConfig.provider === 'deepgram' ? 'bg-slate-900 dark:bg-primary text-white' : 'text-slate-400 dark:text-gray-500'}`}
+            className={`py-3 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${localConfig.provider === 'deepgram' ? 'bg-slate-900 dark:bg-primary text-white shadow-md' : 'text-slate-400 dark:text-gray-500'}`}
           >
             Deepgram Nova
           </button>
@@ -156,23 +156,27 @@ const SettingsView: React.FC<SettingsViewProps> = ({ sessions = [], apiConfig, o
         </div>
       </section>
 
-      {/* Improved Save Button Feedback */}
+      {/* Simplified and Reliable Save Button */}
       <button 
         onClick={handleSave}
-        className={`w-full py-5 rounded-[2rem] font-display text-lg font-black transition-all duration-300 active:scale-[0.98] shadow-2xl flex items-center justify-center gap-3 ${
+        className={`w-full py-5 rounded-[2rem] font-display text-lg font-black transition-all duration-500 active:scale-[0.98] shadow-2xl flex items-center justify-center gap-3 ${
           saveFeedback 
           ? 'bg-green-500 text-white' 
-          : (localConfig.theme === 'light' ? 'bg-slate-900 text-white' : 'bg-gradient-to-r from-primary to-accent text-white')
+          : 'bg-slate-900 dark:bg-accent text-white dark:text-black'
         }`}
       >
-        <span className={`material-symbols-outlined transition-all ${saveFeedback ? 'scale-110 opacity-100' : 'scale-0 opacity-0 w-0'}`}>
-          check_circle
-        </span>
-        <span>{saveFeedback ? 'Settings Synchronized' : 'Save Preferences'}</span>
+        {saveFeedback ? (
+          <>
+            <span className="material-symbols-outlined">check_circle</span>
+            <span>Settings Synchronized</span>
+          </>
+        ) : (
+          <span>Save Preferences</span>
+        )}
       </button>
 
       <div className="pt-4 text-center">
-        <p className="text-[9px] font-black text-slate-400 dark:text-gray-600 uppercase tracking-[0.3em]">EchoListen v1.3.2 Production</p>
+        <p className="text-[9px] font-black text-slate-400 dark:text-gray-600 uppercase tracking-[0.3em]">EchoListen v1.3.4 Production</p>
       </div>
     </div>
   );
